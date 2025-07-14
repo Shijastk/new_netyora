@@ -60,17 +60,21 @@ app.use(helmet({
 }));
 logger.info(colors.green('✓ Helmet security middleware configured'));
 
-// Basic middleware
+const allowedOrigin = process.env.CLIENT_URL || 'https://helpful-treacle-f99c93.netlify.app';
+
+console.log('\n==============================');
+console.log('  \x1b[42m\x1b[30m FRONTEND CORS ALLOWED: \x1b[0m');
+console.log(`  \x1b[36m${allowedOrigin}\x1b[0m`);
+console.log('==============================\n');
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'https://helpful-treacle-f99c93.netlify.app',
-    origin: process.env.CLIENT_URL || "https://helpful-treacle-f99c93.netlify.app/",
+    origin: allowedOrigin,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-console.log('CORS allowed origin:', process.env.CLIENT_URL || 'https://helpful-treacle-f99c93.netlify.app');
 logger.info(colors.green('✓ CORS middleware configured'));
 
 // Performance Middleware
