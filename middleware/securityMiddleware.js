@@ -6,6 +6,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5000',
   // Add your production domains here
+  'https://helpful-treacle-f99c93.netlify.app',
 ];
 
 // List of blocked IPs (in-memory for testing)
