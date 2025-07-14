@@ -60,7 +60,7 @@ app.use(helmet({
 }));
 logger.info(colors.green('✓ Helmet security middleware configured'));
 
-const allowedOrigin = process.env.CLIENT_URL || 'https://helpful-treacle-f99c93.netlify.app';
+const allowedOrigin = process.env.CLIENT_URL || 'https://peppy-madeleine-72c4a8.netlify.app';
 
 console.log('\n==============================');
 console.log('  \x1b[42m\x1b[30m FRONTEND CORS ALLOWED: \x1b[0m');
