@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Profile Update</title>
+</head>
+<body>
+    <h1>Test Profile Update</h1>
+    <p><strong>Note:</strong> Username, email, and phone updates are disabled for security reasons.</p>
+    <form id="updateForm">
+        <div>
+            <label for="firstName">First Name:</label>
+            <input type="text" id="firstName" name="firstName" value="John" required>
+        </div>
+        <div>
+            <label for="lastName">Last Name:</label>
+            <input type="text" id="lastName" name="lastName" value="Doe" required>
+        </div>
+        <div>
+            <label for="bio">Bio:</label>
+            <textarea id="bio" name="bio" rows="3">This is my updated bio</textarea>
+        </div>
+        <div>
+            <label for="about">About:</label>
+            <textarea id="about" name="about" rows="4">This is my detailed about section</textarea>
+        </div>
+        <div>
+            <label for="location.city">City:</label>
+            <input type="text" id="location.city" name="location.city" value="New York">
+        </div>
+        <div>
+            <label for="location.country">Country:</label>
+            <input type="text" id="location.country" name="location.country" value="USA">
+        </div>
+        <div>
+            <label for="timeZone">Time Zone:</label>
+            <input type="text" id="timeZone" name="timeZone" value="UTC-5">
+        </div>
+        <div>
+            <label for="language">Language:</label>
+            <select id="language" name="language">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+            </select>
+        </div>
+        <button type="submit">Update Profile</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+        document.getElementById('updateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const data = {};
+            
+            for (let [key, value] of formData.entries()) {
+                if (key.includes('.')) {
+                    const [parent, child] = key.split('.');
+                    if (!data[parent]) data[parent] = {};
+                    data[parent][child] = value;
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            try {
+                const response = await fetch('http://localhost:5000/api/users/profile', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('authToken')
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <h3>Response:</h3>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h3>Error:</h3>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        });
+    </script>
+</body>
+</html> 

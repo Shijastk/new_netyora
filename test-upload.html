@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 3px;
+            white-space: pre-wrap;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background-color: #e8f5e8;
+            color: #2e7d32;
+        }
+        button {
+            background-color: #2196f3;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #1976d2;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Upload Test</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Simple File Upload (No Multer)</h2>
+        <input type="file" id="file1" accept="image/*">
+        <button onclick="testSimpleUpload()">Test Simple Upload</button>
+        <div id="result1" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Multer File Upload</h2>
+        <input type="file" id="file2" accept="image/*">
+        <button onclick="testMulterUpload()">Test Multer Upload</button>
+        <div id="result2" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Chat File Upload</h2>
+        <input type="file" id="file3" accept="image/*">
+        <input type="text" id="chatId" placeholder="Chat ID (e.g., 68714014f90d7fdb8f083c71)" value="68714014f90d7fdb8f083c71">
+        <button onclick="testChatUpload()">Test Chat Upload</button>
+        <div id="result3" class="result"></div>
+    </div>
+
+    <script>
+        async function testSimpleUpload() {
+            const fileInput = document.getElementById('file1');
+            const resultDiv = document.getElementById('result1');
+            
+            if (!fileInput.files[0]) {
+                resultDiv.innerHTML = 'Please select a file first';
+                resultDiv.className = 'result error';
+                return;
+            }
+
+            const file = fileInput.files[0];
+            resultDiv.innerHTML = 'Uploading...';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch('http://localhost:5000/api/test-simple-upload', {
+                    method: 'POST',
+                    body: file,
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+                    }
+                });
+
+                const result = await response.json();
+                resultDiv.innerHTML = JSON.stringify(result, null, 2);
+                resultDiv.className = response.ok ? 'result success' : 'result error';
+            } catch (error) {
+                resultDiv.innerHTML = 'Error: ' + error.message;
+                resultDiv.className = 'result error';
+            }
+        }
+
+        async function testMulterUpload() {
+            const fileInput = document.getElementById('file2');
+            const resultDiv = document.getElementById('result2');
+            
+            if (!fileInput.files[0]) {
+                resultDiv.innerHTML = 'Please select a file first';
+                resultDiv.className = 'result error';
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            resultDiv.innerHTML = 'Uploading...';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch('http://localhost:5000/api/test-multer', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+                    }
+                });
+
+                const result = await response.json();
+                resultDiv.innerHTML = JSON.stringify(result, null, 2);
+                resultDiv.className = response.ok ? 'result success' : 'result error';
+            } catch (error) {
+                resultDiv.innerHTML = 'Error: ' + error.message;
+                resultDiv.className = 'result error';
+            }
+        }
+
+        async function testChatUpload() {
+            const fileInput = document.getElementById('file3');
+            const chatIdInput = document.getElementById('chatId');
+            const resultDiv = document.getElementById('result3');
+            
+            if (!fileInput.files[0]) {
+                resultDiv.innerHTML = 'Please select a file first';
+                resultDiv.className = 'result error';
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const chatId = chatIdInput.value;
+            const formData = new FormData();
+            formData.append('file', file);
+
+            resultDiv.innerHTML = 'Uploading...';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch(`http://localhost:5000/api/chat/message/${chatId}/file`, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+                    }
+                });
+
+                const result = await response.json();
+                resultDiv.innerHTML = JSON.stringify(result, null, 2);
+                resultDiv.className = response.ok ? 'result success' : 'result error';
+            } catch (error) {
+                resultDiv.innerHTML = 'Error: ' + error.message;
+                resultDiv.className = 'result error';
+            }
+        }
+
+        // Add auth token if available
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('authToken');
+            if (token) {
+                console.log('Auth token found:', token.substring(0, 20) + '...');
+            } else {
+                console.log('No auth token found. Some tests may fail.');
+            }
+        });
+    </script>
+</body>
+</html> 
