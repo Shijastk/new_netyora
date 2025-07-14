@@ -63,7 +63,7 @@ logger.info(colors.green('✓ Helmet security middleware configured'));
 // Basic middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:8080",
+    origin: process.env.CLIENT_URL || "https://helpful-treacle-f99c93.netlify.app/",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
