@@ -34,14 +34,16 @@ const debugEnv = checkEnvVars();
 logger.info(colors.green('✓ Environment variables checked and feature flags set'));
 
 const app = express();
-// Middleware to measure and provide response time in ms for every request
+// Middleware to measure and provide response time in ms for every request (fixed for headers)
 app.use((req, res, next) => {
   const startHrTime = process.hrtime();
-  res.on('finish', () => {
+  const originalWriteHead = res.writeHead;
+  res.writeHead = function (...args) {
     const elapsedHrTime = process.hrtime(startHrTime);
     const elapsedMs = (elapsedHrTime[0] * 1000 + elapsedHrTime[1] / 1e6).toFixed(2);
-    res.setHeader('X-Response-Time-ms', elapsedMs); // <-- single line for frontend
-  });
+    res.setHeader('X-Response-Time-ms', elapsedMs);
+    originalWriteHead.apply(res, args);
+  };
   next();
 });
 
