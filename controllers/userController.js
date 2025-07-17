@@ -126,7 +126,7 @@ exports.login = async (req, res) => {
       const token = generateToken(user._id);
 
     // Track login activity
-    await createUserActivity(
+    createUserActivity(
       user._id,
       'login',
       `User login: ${user.username}`,
@@ -135,7 +135,7 @@ exports.login = async (req, res) => {
         username: user.username,
         loginMethod: email ? 'email' : username ? 'username' : 'identifier'
       }
-    );
+    ); // No await, make it async
 
     // Return user data and token
       res.json({

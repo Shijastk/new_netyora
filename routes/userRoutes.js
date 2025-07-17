@@ -4,9 +4,12 @@ const userController = require('../controllers/userController');
 const auth = require('../middleware/auth');
 const { single, handleUploadError } = require('../middleware/uploadMiddleware');
 
+// Add JSON parsing only to routes that need it
+const jsonParser = express.json({ limit: '10mb' });
+
 // Public routes
-router.post('/register', userController.registerUser);
-router.post('/login', userController.login);
+router.post('/register', jsonParser, userController.registerUser);
+router.post('/login', jsonParser, userController.login);
 
 // Profile routes (public)
 router.get('/profiles', userController.getAllProfiles);
