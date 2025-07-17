@@ -34,9 +34,17 @@ const debugEnv = checkEnvVars();
 logger.info(colors.green('✓ Environment variables checked and feature flags set'));
 
 const app = express();
+// Middleware to measure and provide response time in ms for every request
+app.use((req, res, next) => {
+  const startHrTime = process.hrtime();
+  res.on('finish', () => {
+    const elapsedHrTime = process.hrtime(startHrTime);
+    const elapsedMs = (elapsedHrTime[0] * 1000 + elapsedHrTime[1] / 1e6).toFixed(2);
+    res.setHeader('X-Response-Time-ms', elapsedMs); // <-- single line for frontend
+  });
+  next();
+});
 
-// Add JSON body parsing middleware
-app.use(express.json());
 const server = http.createServer(app);
 
 // Increase server header size limits
@@ -333,13 +341,9 @@ logger.info(colors.green('✓ Shutdown handlers configured'));
 
 const startServer = async () => {
   try {
-    const ports = [5000, 5001, 5002, 5003, 5004];
-    
-    for (const port of ports) {
-      try {
-        await new Promise((resolve, reject) => {
-          server.listen(port, () => {
-            const serverStatus = `
+    const port = process.env.PORT || 5000;
+    server.listen(port, () => {
+      const serverStatus = `
 ╔════════════════════════════════════════════════════════════╗
 ║ Server Status                                              ║
 ╠════════════════════════════════════════════════════════════╣
@@ -350,27 +354,9 @@ const startServer = async () => {
 ║ ${colors.yellow('Cloudinary:')} ${colors.cyan('Connected')}                    ║
 ║ ${colors.yellow('Redis:')} ${colors.cyan(process.env.REDIS_URL ? 'Connected' : 'Not configured')} ║
 ╚════════════════════════════════════════════════════════════╝
-            `;
-            console.log(serverStatus);
-            resolve();
-          }).on('error', (err) => {
-            if (err.code === 'EADDRINUSE') {
-              logger.warn(colors.yellow(`⚠ Port ${port} is in use, trying next port...`));
-              resolve();
-            } else {
-              reject(err);
-            }
-          });
-        });
-        return;
-      } catch (err) {
-        if (err.code !== 'EADDRINUSE') {
-          throw err;
-        }
-      }
-    }
-    
-    throw new Error('All ports are in use');
+      `;
+      console.log(serverStatus);
+    });
   } catch (error) {
     logger.error(colors.red('✗ Server error:'), error);
     console.log(createStatusMessage('Server Error', colors.red(error.message)));
