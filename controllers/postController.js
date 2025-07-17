@@ -1400,7 +1400,7 @@ exports.getMainFeed = async (req, res, next) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const skip = (page - 1) * limit;
-
+    
     // Only fetch public posts, most recent first, with minimal population
     const posts = await Post.find({ visibility: 'public', user: { $ne: null } })
       .sort({ createdAt: -1 })

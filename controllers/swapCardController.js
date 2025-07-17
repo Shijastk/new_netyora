@@ -9,6 +9,16 @@ const videoSessionController = require('./videoSessionController');
 const chatController = require('./chatController');
 const logger = require('../utils/logger');
 
+// Simple in-memory cache for swap requests (per user, per endpoint)
+const swapRequestCache = {
+  inbox: new Map(), // key: userId+status+offset+limit, value: { data, expires }
+  outbox: new Map()
+};
+
+function getCacheKey(userId, status, offset, limit) {
+  return `${userId || ''}|${status || ''}|${offset || 0}|${limit || 10}`;
+}
+
 // Create a new swap card
 exports.createSwapCard = async (req, res, next) => {
   try {
@@ -55,7 +65,7 @@ exports.createSwapCard = async (req, res, next) => {
   }
 };
 
-// Get all swap cards (with filters, search, etc.)
+// Get all swap cards (fast version, no requestCount/requestedUsers)
 exports.getSwapCards = async (req, res, next) => {
   try {
     const filter = {};
@@ -65,29 +75,16 @@ exports.getSwapCards = async (req, res, next) => {
     if (req.query.country) filter['location.country'] = req.query.country;
     if (req.query.user) filter.user = req.query.user;
     if (req.query.featured) filter.isFeatured = req.query.featured === 'true';
-    let swapCards = await SwapCard.find(filter)
+
+    // Only select and populate essential fields
+    const swapCards = await SwapCard.find(filter)
+      .select('_id user offeredSkill desiredSkill title description type status tags location availability images createdAt')
       .populate('user', 'username firstName lastName avatar')
       .populate('offeredSkill', 'title')
       .populate('desiredSkill', 'title')
-      .sort('-createdAt');
-    // Ensure avatar is always present
-    swapCards = await Promise.all(swapCards.map(async card => {
-      if (card.user && !card.user.avatar) {
-        if (card.user.gender === 'female') {
-          card.user.avatar = '../../public/IMAGES/female.jpg';
-        } else {
-          card.user.avatar = '../../public/IMAGES/male.jpg';
-        }
-      }
-      // Add requestedUsers and requestCount
-      const requests = await SwapRequest.find({ swapCardId: card._id });
-      const requestedUsers = requests.map(r => r.sender.toString());
-      return {
-        ...card.toObject(),
-        requestedUsers,
-        requestCount: requestedUsers.length
-      };
-    }));
+      .sort('-createdAt')
+      .lean();
+
     res.json(swapCards);
   } catch (err) {
     next(err);
@@ -196,71 +193,127 @@ exports.updateSwapCard = async (req, res, next) => {
 
 // --- Swap Request Management ---
 
-// GET /swapcards/requests/inbox
+// GET /swapcards/requests/inbox (optimized for card display, minimal fields, with cache)
 exports.getSwapRequestsInbox = async (req, res, next) => {
   try {
-    const { status, limit = 20, offset = 0 } = req.query;
-    const filter = { receiver: req.user.id };
+    const { status, limit = 10, offset = 0 } = req.query;
+    const userId = req.user.id;
+    const cacheKey = getCacheKey(userId, status, offset, limit);
+    const now = Date.now();
+    const cached = swapRequestCache.inbox.get(cacheKey);
+    if (cached && cached.expires > now) {
+      return res.json({ success: true, data: cached.data, cached: true });
+    }
+    const filter = { receiver: userId };
     if (status) filter.status = status;
     const requests = await SwapRequest.find(filter)
+      .select('_id sender receiver swapCardId status notes createdAt')
       .populate('sender', 'username firstName lastName avatar')
       .populate('receiver', 'username firstName lastName avatar')
-      .populate('swapCardId')
-      .populate('proposedSwapCardId')
-      .skip(Number(offset)).limit(Number(limit));
-    
-    // Transform the data to include user name and always include notes
-    const transformedRequests = requests.map(request => {
-      const obj = request.toObject();
-      return {
-        ...obj,
-        notes: obj.notes || '',
-        sender: {
-          ...request.sender.toObject(),
-          name: `${request.sender.firstName || ''} ${request.sender.lastName || ''}`.trim() || request.sender.username
-        },
-        receiver: {
-          ...request.receiver.toObject(),
-          name: `${request.receiver.firstName || ''} ${request.receiver.lastName || ''}`.trim() || request.receiver.username
-        }
-      };
-    });
-    
-    res.json({ success: true, data: transformedRequests });
+      .populate({
+        path: 'swapCardId',
+        select: '_id title type location user description availability',
+      })
+      .sort('-createdAt')
+      .skip(Number(offset)).limit(Number(limit))
+      .lean();
+
+    // Format for card display
+    const data = requests.map(req => ({
+      _id: req._id,
+      status: req.status,
+      createdAt: req.createdAt,
+      sender: req.sender ? {
+        _id: req.sender._id,
+        username: req.sender.username,
+        firstName: req.sender.firstName,
+        lastName: req.sender.lastName,
+        avatar: req.sender.avatar,
+        name: `${req.sender.firstName || ''} ${req.sender.lastName || ''}`.trim() || req.sender.username
+      } : undefined,
+      receiver: req.receiver ? {
+        _id: req.receiver._id,
+        username: req.receiver.username,
+        firstName: req.receiver.firstName,
+        lastName: req.receiver.lastName,
+        avatar: req.receiver.avatar,
+        name: `${req.receiver.firstName || ''} ${req.receiver.lastName || ''}`.trim() || req.receiver.username
+      } : undefined,
+      swapCardId: req.swapCardId ? {
+        _id: req.swapCardId._id,
+        title: req.swapCardId.title,
+        type: req.swapCardId.type,
+        location: req.swapCardId.location,
+        user: req.swapCardId.user,
+        description: req.swapCardId.description,
+        availability: req.swapCardId.availability
+      } : undefined,
+      notes: req.notes
+    }));
+    swapRequestCache.inbox.set(cacheKey, { data, expires: now + 5000 }); // cache for 5 seconds
+    res.json({ success: true, data, cached: false });
   } catch (err) { next(err); }
 };
 
-// GET /swapcards/requests/outbox
+// GET /swapcards/requests/outbox (optimized for card display, minimal fields, with cache)
 exports.getSwapRequestsOutbox = async (req, res, next) => {
   try {
-    const { status, limit = 20, offset = 0 } = req.query;
-    const filter = { sender: req.user.id };
+    const { status, limit = 10, offset = 0 } = req.query;
+    const userId = req.user.id;
+    const cacheKey = getCacheKey(userId, status, offset, limit);
+    const now = Date.now();
+    const cached = swapRequestCache.outbox.get(cacheKey);
+    if (cached && cached.expires > now) {
+      return res.json({ success: true, data: cached.data, cached: true });
+    }
+    const filter = { sender: userId };
     if (status) filter.status = status;
     const requests = await SwapRequest.find(filter)
+      .select('_id sender receiver swapCardId status notes createdAt')
       .populate('sender', 'username firstName lastName avatar')
       .populate('receiver', 'username firstName lastName avatar')
-      .populate('swapCardId')
-      .populate('proposedSwapCardId')
-      .skip(Number(offset)).limit(Number(limit));
-    
-    // Transform the data to include user name and always include notes
-    const transformedRequests = requests.map(request => {
-      const obj = request.toObject();
-      return {
-        ...obj,
-        notes: obj.notes || '',
-        sender: {
-          ...request.sender.toObject(),
-          name: `${request.sender.firstName || ''} ${request.sender.lastName || ''}`.trim() || request.sender.username
-        },
-        receiver: {
-          ...request.receiver.toObject(),
-          name: `${request.receiver.firstName || ''} ${request.receiver.lastName || ''}`.trim() || request.receiver.username
-        }
-      };
-    });
-    
-    res.json({ success: true, data: transformedRequests });
+      .populate({
+        path: 'swapCardId',
+        select: '_id title type location user description availability',
+      })
+      .sort('-createdAt')
+      .skip(Number(offset)).limit(Number(limit))
+      .lean();
+
+    // Format for card display
+    const data = requests.map(req => ({
+      _id: req._id,
+      status: req.status,
+      createdAt: req.createdAt,
+      sender: req.sender ? {
+        _id: req.sender._id,
+        username: req.sender.username,
+        firstName: req.sender.firstName,
+        lastName: req.sender.lastName,
+        avatar: req.sender.avatar,
+        name: `${req.sender.firstName || ''} ${req.sender.lastName || ''}`.trim() || req.sender.username
+      } : undefined,
+      receiver: req.receiver ? {
+        _id: req.receiver._id,
+        username: req.receiver.username,
+        firstName: req.receiver.firstName,
+        lastName: req.receiver.lastName,
+        avatar: req.receiver.avatar,
+        name: `${req.receiver.firstName || ''} ${req.receiver.lastName || ''}`.trim() || req.receiver.username
+      } : undefined,
+      swapCardId: req.swapCardId ? {
+        _id: req.swapCardId._id,
+        title: req.swapCardId.title,
+        type: req.swapCardId.type,
+        location: req.swapCardId.location,
+        user: req.swapCardId.user,
+        description: req.swapCardId.description,
+        availability: req.swapCardId.availability
+      } : undefined,
+      notes: req.notes
+    }));
+    swapRequestCache.outbox.set(cacheKey, { data, expires: now + 5000 }); // cache for 5 seconds
+    res.json({ success: true, data, cached: false });
   } catch (err) { next(err); }
 };
 

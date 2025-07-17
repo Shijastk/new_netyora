@@ -15,12 +15,11 @@ const axios = require('axios');
 const http = require('http');
 const https = require('https');
 
-// Get all chats for user with pagination (optimized for speed and size)
+// Get all chats for user with pagination (max speed, no unread count)
 exports.getChats = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const { limit = 20, cursor, search } = req.query;
-    // Build query
     const query = { participants: userId };
     if (search) {
       query.$or = [
@@ -35,35 +34,30 @@ exports.getChats = async (req, res, next) => {
         query._id = { $lt: new mongoose.Types.ObjectId(cursor) };
       }
     }
-    // Only select essential fields for chat list
+
+    // Only select essential fields, NOT the full messages array
     const chats = await Chat.find(query)
-      .select('_id type title avatar participants lastMessage updatedAt readBy messages')
+      .select('_id type title avatar participants lastMessage updatedAt readBy')
       .populate('participants', 'username firstName lastName avatar gender')
       .sort({ updatedAt: -1 })
       .limit(parseInt(limit) + 1)
       .lean();
+
     const hasMore = chats.length > parseInt(limit);
     const nextCursor = hasMore ? chats[parseInt(limit) - 1]._id : null;
     const chatsToReturn = hasMore ? chats.slice(0, parseInt(limit)) : chats;
-    // Only send unreadCount, not all messages
-    const processedChats = chatsToReturn.map(chat => {
-      const unreadCount = Array.isArray(chat.messages)
-        ? chat.messages.filter(msg =>
-            !chat.readBy.includes(msg.sender?.toString?.()) &&
-            msg.sender?.toString?.() !== userId.toString()
-          ).length
-        : 0;
-      return {
-        _id: chat._id,
-        type: chat.type,
-        title: chat.title,
-        avatar: chat.avatar,
-        participants: chat.participants,
-        lastMessage: chat.lastMessage,
-        unreadCount,
-        updatedAt: chat.updatedAt
-      };
-    });
+
+    // Do NOT calculate unreadCount for max speed
+    const processedChats = chatsToReturn.map(chat => ({
+      _id: chat._id,
+      type: chat.type,
+      title: chat.title,
+      avatar: chat.avatar,
+      participants: chat.participants,
+      lastMessage: chat.lastMessage,
+      updatedAt: chat.updatedAt
+    }));
+
     res.json({
       chats: processedChats,
       pagination: {
