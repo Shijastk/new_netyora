@@ -104,7 +104,7 @@ exports.getChat = async (req, res, next) => {
           if (user.gender === 'female') {
             user.avatar = '../../public/IMAGES/female.jpg';
           } else {
-            user.avatar = '../../public/IMAGES/male.jpg';
+            user.avatar = '../../public""';
           }
         }
         

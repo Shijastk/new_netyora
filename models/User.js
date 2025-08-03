@@ -14,15 +14,15 @@ const badgeSchema = new mongoose.Schema({
 });
 
 const contactSchema = new mongoose.Schema({
-  email: { type: String },
-  phone: { type: String },
+  email: { type: String, trim: true },
+  phone: { type: String, trim: true },
   visibility: { type: String, enum: ['public', 'private'], default: 'private' },
-});
+}, { _id: false });
 
 const locationSchema = new mongoose.Schema({
-  city: String,
-  country: { type: String, index: true },
-});
+  city: { type: String, trim: true },
+  country: { type: String, trim: true, index: true },
+}, { _id: false });
 
 const onlineStatusSchema = new mongoose.Schema({
   isOnline: { type: Boolean, default: false },
@@ -49,14 +49,14 @@ const userSchema = new mongoose.Schema({
     unique: true,
     trim: true
   },
-  firstName: String,
-  lastName: String,
+  firstName: { type: String, trim: true },
+  lastName: { type: String, trim: true },
   avatar: String,
   avatarThumbnail: String,
   avatarSmall: String,
   banner: String,
-  bio: String,
-  about: { type: String }, // About me section
+  bio: { type: String, trim: true },
+  about: { type: String, trim: true }, // About me section
   skills: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Skill' }],
   lookingFor: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -64,8 +64,8 @@ const userSchema = new mongoose.Schema({
   }],
   location: locationSchema,
   contact: contactSchema,
-  timeZone: { type: String },
-  language: { type: String },
+  timeZone: { type: String, trim: true },
+  language: { type: String, trim: true },
   onlineStatus: { type: onlineStatusSchema, default: () => ({}) },
   following: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -152,7 +152,7 @@ userSchema.methods.getAvatarUrl = function(size = 'full') {
         return this.avatar;
     }
   }
-  return this.gender === 'female' ? '/IMAGES/female.png' : '/IMAGES/male.jpg';
+  return this.gender === 'female' ?  "" :  "";
 };
 
 module.exports = mongoose.model('User', userSchema);

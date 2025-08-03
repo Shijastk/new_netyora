@@ -145,7 +145,7 @@ exports.login = async (req, res) => {
           username: user.username,
           firstName: user.firstName,
           lastName: user.lastName,
-          avatar: user.avatar
+          avatar: user.avatar,
         },
         token
       });
@@ -232,7 +232,15 @@ const fs = require('fs');
 
 exports.updateProfile = async (req, res) => {
   try {
+    logger.info('Profile update request received:', {
+      userId: req.user._id,
+      body: req.body
+    });
+    
     const updates = sanitizeInput(req.body);
+    
+    logger.info('Sanitized updates:', { updates });
+    logger.info('Original body:', { body: req.body });
     
     // Remove any fields that shouldn't be updated directly
     delete updates.password;
@@ -241,57 +249,191 @@ exports.updateProfile = async (req, res) => {
     delete updates._id;
     delete updates.createdAt;
     delete updates.updatedAt;
-
-    // Handle nested objects
-    if (updates.location) {
-      updates.location = {
-        city: updates.location.city,
-        country: updates.location.country
-      };
+    
+    // Validate and clean string fields
+    if (updates.firstName !== undefined) {
+      updates.firstName = updates.firstName.trim();
+      if (updates.firstName === '') {
+        delete updates.firstName;
+      } else if (updates.firstName.length > 50) {
+        return res.status(400).json({ 
+          error: 'First name is too long (max 50 characters)' 
+        });
+      }
+    }
+    if (updates.lastName !== undefined) {
+      updates.lastName = updates.lastName.trim();
+      if (updates.lastName === '') {
+        delete updates.lastName;
+      } else if (updates.lastName.length > 50) {
+        return res.status(400).json({ 
+          error: 'Last name is too long (max 50 characters)' 
+        });
+      }
+    }
+    
+    // Ensure at least one name field is provided
+    if (updates.firstName === undefined && updates.lastName === undefined) {
+      const currentUser = await User.findById(req.user._id).select('firstName lastName');
+      if (!currentUser.firstName && !currentUser.lastName) {
+        return res.status(400).json({ 
+          error: 'At least one name field (first name or last name) is required' 
+        });
+      }
+    }
+    if (updates.bio !== undefined) {
+      updates.bio = updates.bio.trim();
+      if (updates.bio === '') {
+        delete updates.bio;
+      } else if (updates.bio.length > 500) {
+        return res.status(400).json({ 
+          error: 'Bio is too long (max 500 characters)' 
+        });
+      }
+    }
+    if (updates.about !== undefined) {
+      updates.about = updates.about.trim();
+      if (updates.about === '') {
+        delete updates.about;
+      } else if (updates.about.length > 2000) {
+        return res.status(400).json({ 
+          error: 'About section is too long (max 2000 characters)' 
+        });
+      }
+    }
+    
+    // Validate language field
+    if (updates.language !== undefined) {
+      const validLanguages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko'];
+      if (!validLanguages.includes(updates.language)) {
+        return res.status(400).json({ 
+          error: 'Invalid language code' 
+        });
+      }
+    }
+    
+    // Validate timeZone field
+    if (updates.timeZone !== undefined) {
+      if (updates.timeZone.length > 50) {
+        return res.status(400).json({ 
+          error: 'Time zone description is too long (max 50 characters)' 
+        });
+      }
     }
 
+    // Handle nested objects - only reconstruct if needed
+    if (updates.location && typeof updates.location === 'object') {
+      // Ensure location object has the correct structure
+      const locationData = {};
+      if (updates.location.city !== undefined && updates.location.city.trim() !== '') {
+        const city = updates.location.city.trim();
+        if (city.length > 100) {
+          return res.status(400).json({ 
+            error: 'City name is too long (max 100 characters)' 
+          });
+        }
+        locationData.city = city;
+      }
+      if (updates.location.country !== undefined && updates.location.country.trim() !== '') {
+        const country = updates.location.country.trim();
+        if (country.length > 100) {
+          return res.status(400).json({ 
+            error: 'Country name is too long (max 100 characters)' 
+          });
+        }
+        locationData.country = country;
+      }
+      
+      // Only update if we have valid location data
+      if (Object.keys(locationData).length > 0) {
+        updates.location = locationData;
+      } else {
+        delete updates.location; // Remove empty location object
+      }
+    }
+
+    // Check if there are any updates to make
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ 
+        error: 'No valid fields to update' 
+      });
+    }
+    
+    logger.info('Attempting to update user with data:', { 
+      userId: req.user._id, 
+      updates 
+    });
+    
+    // Check if user exists first
+    const existingUser = await User.findById(req.user._id);
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updates },
       { new: true, runValidators: true }
     ).select('-password');
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    // Track profile update activity
+    try {
+      const updateFields = Object.keys(updates).join(', ');
+      await createUserActivity(
+        user._id,
+        'profile_update',
+        `Profile updated: ${updateFields}`,
+        `Successfully updated profile fields: ${updateFields}`,
+        { updatedFields: updateFields }
+      );
+    } catch (activityError) {
+      logger.error('Failed to create activity record:', activityError);
+      // Don't fail the entire request if activity creation fails
     }
 
-    // Track profile update activity
-    const updateFields = Object.keys(updates).join(', ');
-    await createUserActivity(
-      user._id,
-      'profile_update',
-      `Profile updated: ${updateFields}`,
-      `Successfully updated profile fields: ${updateFields}`,
-      { updatedFields: updateFields }
-    );
-
+    logger.info('Profile update successful:', { userId: user._id });
+    
     res.json({
-      _id: user._id,
-      email: user.email,
-      username: user.username,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar,
-      banner: user.banner,
-      bio: user.bio,
-      about: user.about,
-      skills: user.skills,
-      lookingFor: user.lookingFor,
-      location: user.location,
-      contact: user.contact,
-      timeZone: user.timeZone,
-      language: user.language,
-      privacy: user.privacy,
-      badges: user.badges,
-      credits: user.credits
+      success: true,
+      user: {
+        _id: user._id,
+        email: user.email,
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatar: user.avatar,
+        banner: user.banner,
+        bio: user.bio,
+        about: user.about,
+        skills: user.skills,
+        lookingFor: user.lookingFor,
+        location: user.location,
+        contact: user.contact,
+        timeZone: user.timeZone,
+        language: user.language,
+        privacy: user.privacy,
+        badges: user.badges,
+        credits: user.credits
+      }
     });
   } catch (err) {
     logger.error('Profile update error:', err);
+    
+    // Provide more specific error messages
+    if (err.name === 'ValidationError') {
+      const validationErrors = Object.values(err.errors).map(error => error.message);
+      return res.status(400).json({ 
+        error: 'Validation error', 
+        details: validationErrors 
+      });
+    }
+    
+    if (err.name === 'CastError') {
+      return res.status(400).json({ 
+        error: 'Invalid data format' 
+      });
+    }
+    
     res.status(500).json({ error: 'Error updating profile' });
   }
 };
@@ -531,7 +673,7 @@ exports.getAllProfiles = async (req, res) => {
       
       // Ensure avatar has default value
       if (!userObj.avatar) {
-        userObj.avatar = userObj.gender === 'female' ? '/IMAGES/female.png' : '/IMAGES/male.jpg';
+        userObj.avatar = userObj.gender === 'female' ?  "" :  "";
       }
 
       // Add display name
@@ -642,7 +784,7 @@ exports.searchUsersForChat = async (req, res) => {
       const u = user.toObject();
       u.displayName = (u.firstName || u.lastName) ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : u.username;
       if (!u.avatar) {
-        u.avatar = u.gender === 'female' ? '/IMAGES/female.png' : '/IMAGES/male.jpg';
+        u.avatar = u.gender === 'female' ?  "" :  "";
       }
       return u;
     });

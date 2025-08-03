@@ -22,7 +22,7 @@ router.use(auth);
 router.get('/search', userController.searchUsersForChat);
 
 // Profile management routes (protected)
-router.put('/profile', userController.updateProfile);
+router.put('/profile', jsonParser, userController.updateProfile);
 router.post('/upload-avatar', auth, single('avatar'), handleUploadError, userController.uploadAvatar);
 router.delete('/profile', userController.deleteProfile);
 

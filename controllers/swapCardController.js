@@ -1,7 +1,7 @@
 const SwapCard = require('../models/SwapCard');
 const sanitizeInput = require('../utils/sanitizeInput');
-const male = "../IMAGES/male.jpg";
-const female = "../IMAGES/female.png";
+const male =  "";
+const female =  "";
 const SwapRequest = require('../models/SwapRequest');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
@@ -108,7 +108,7 @@ exports.getSwapCard = async (req, res, next) => {
       if (swapCard.user.gender === 'female') {
         swapCard.user.avatar = '../../public/IMAGES/female.jpg';
       } else {
-        swapCard.user.avatar = '../../public/IMAGES/male.jpg';
+        swapCard.user.avatar = '../../public""';
       }
     }
     // Optionally increment views

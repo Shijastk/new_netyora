@@ -295,7 +295,8 @@ exports.getPostById = async (req, res, next) => {
 // POST /api/posts - Create text-only post
 exports.createPost = async (req, res, next) => {
   try {
-    const { community, content, postType, tags, visibility } = sanitizeInput(req.body);
+    const sanitizedBody = sanitizeInput(req.body);
+    const { community, content, postType, tags, visibility } = sanitizedBody || {};
     const allowedPostTypes = [
       'Learning update',
       'Ask Question',
@@ -384,7 +385,8 @@ exports.createPost = async (req, res, next) => {
 // POST /api/posts/with-images - Create post with images
 exports.createPostWithImages = async (req, res, next) => {
   try {
-    const { community, content, postType, tags, visibility } = sanitizeInput(req.body);
+    const sanitizedBody = sanitizeInput(req.body);
+    const { community, content, postType, tags, visibility } = sanitizedBody || {};
     const allowedPostTypes = [
       'Learning update',
       'Ask Question',
@@ -419,58 +421,81 @@ exports.createPostWithImages = async (req, res, next) => {
         const path = require('path');
         const fs = require('fs');
         
+        logger.info('Processing uploaded files:', {
+          fileCount: req.files.length,
+          files: req.files.map(f => ({ 
+            originalname: f.originalname, 
+            mimetype: f.mimetype, 
+            size: f.size,
+            path: f.path 
+          }))
+        });
+        
         // Upload all images to Cloudinary with advanced optimization
         const uploadPromises = req.files.map(async (file) => {
-          // Validate image first
-          const validation = await imageCompression.validateImage(file.path);
-          if (!validation.valid) {
-            throw new Error(`Invalid image: ${validation.error}`);
+          try {
+            // Validate image first
+            const validation = await imageCompression.validateImage(file.path);
+            if (!validation.valid) {
+              throw new Error(`Invalid image: ${validation.error}`);
+            }
+
+            // Compress image before upload
+            const compressedPath = file.path.replace(path.extname(file.path), '_compressed.webp');
+            await imageCompression.compressImage(file.path, compressedPath, {
+              width: 1200,
+              height: 1200,
+              quality: 85,
+              format: 'webp'
+            });
+
+            // Upload compressed image to Cloudinary
+            const result = await cloudinary.uploader.upload(compressedPath, {
+              folder: 'post-images',
+              transformation: [
+                { width: 1200, height: 1200, crop: 'limit' },
+                { quality: 'auto' },
+                { fetch_format: 'auto' }
+              ],
+              resource_type: 'image',
+              eager: [
+                { width: 300, height: 300, crop: 'thumb', gravity: 'auto' },
+                { width: 600, height: 600, crop: 'limit' }
+              ],
+              eager_async: true,
+              eager_notification_url: process.env.CLOUDINARY_WEBHOOK_URL
+            });
+
+            // Clean up files
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+            if (fs.existsSync(compressedPath)) {
+              fs.unlinkSync(compressedPath);
+            }
+            
+            return {
+              url: result.secure_url,
+              thumbnailUrl: result.eager?.[0]?.secure_url || result.secure_url.replace('/upload/', '/upload/c_thumb,w_300,h_300/'),
+              mediumUrl: result.eager?.[1]?.secure_url || result.secure_url,
+              publicId: result.public_id,
+              fileName: file.originalname,
+              fileSize: result.bytes,
+              originalSize: file.size,
+              width: result.width,
+              height: result.height,
+              alt: file.originalname,
+              format: result.format,
+              compressionRatio: ((file.size - result.bytes) / file.size * 100).toFixed(2)
+            };
+          } catch (fileError) {
+            logger.error('Error processing file:', fileError);
+            // Clean up file if it exists
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+            throw fileError;
           }
-
-          // Compress image before upload
-          const compressedPath = file.path.replace(path.extname(file.path), '_compressed.webp');
-          await imageCompression.compressImage(file.path, compressedPath, {
-            width: 1200,
-            height: 1200,
-            quality: 85,
-            format: 'webp'
-          });
-
-          // Upload compressed image to Cloudinary
-          const result = await cloudinary.uploader.upload(compressedPath, {
-            folder: 'post-images',
-            transformation: [
-              { width: 1200, height: 1200, crop: 'limit' },
-              { quality: 'auto' },
-              { fetch_format: 'auto' }
-            ],
-            resource_type: 'image',
-            eager: [
-              { width: 300, height: 300, crop: 'thumb', gravity: 'auto' },
-              { width: 600, height: 600, crop: 'limit' }
-            ],
-            eager_async: true,
-            eager_notification_url: process.env.CLOUDINARY_WEBHOOK_URL
-          });
-
-          // Clean up files
-          fs.unlinkSync(file.path);
-          fs.unlinkSync(compressedPath);
-          
-          return {
-            url: result.secure_url,
-            thumbnailUrl: result.eager?.[0]?.secure_url || result.secure_url.replace('/upload/', '/upload/c_thumb,w_300,h_300/'),
-            mediumUrl: result.eager?.[1]?.secure_url || result.secure_url,
-            publicId: result.public_id,
-            fileName: file.originalname,
-            fileSize: result.bytes,
-            originalSize: file.size,
-            width: result.width,
-            height: result.height,
-            alt: file.originalname,
-            format: result.format,
-            compressionRatio: ((file.size - result.bytes) / file.size * 100).toFixed(2)
-          };
         });
 
         images = await Promise.all(uploadPromises);
@@ -484,7 +509,7 @@ exports.createPostWithImages = async (req, res, next) => {
         });
       } catch (uploadError) {
         logger.error('Image upload error:', uploadError);
-        return res.status(500).json({ error: 'Failed to upload images.' });
+        return res.status(500).json({ error: 'Failed to upload images: ' + uploadError.message });
       }
     }
 
@@ -550,6 +575,264 @@ exports.createPostWithImages = async (req, res, next) => {
     res.status(201).json(postJson);
   } catch (err) {
     logger.error('Error creating post with images:', err);
+    next(err);
+  }
+};
+
+// POST /api/posts/with-binary-images - Create post with binary images
+exports.createPostWithBinaryImages = async (req, res, next) => {
+  try {
+    const sanitizedBody = sanitizeInput(req.body);
+    const { community, content, postType, tags, visibility, images } = sanitizedBody || {};
+    
+    const allowedPostTypes = [
+      'Learning update',
+      'Ask Question',
+      'Share Tips',
+      'Study Groups'
+    ];
+    
+    if (!postType || !allowedPostTypes.includes(postType)) {
+      return res.status(200).json({
+        error: 'postType is required and must be one of: ' + allowedPostTypes.join(', '),
+        postType: ''
+      });
+    }
+    
+    if (!content && (!images || images.length === 0)) {
+      return res.status(400).json({ error: 'Content or images required.' });
+    }
+    
+    logger.info('Creating post with binary images:', {
+      userId: req.user._id,
+      content: content ? content.substring(0, 50) + '...' : 'No content',
+      postType,
+      tags,
+      imageCount: images ? images.length : 0
+    });
+
+    let processedImages = [];
+    
+    // Handle binary image data
+    if (images && images.length > 0) {
+      try {
+        const cloudinary = require('cloudinary').v2;
+        const imageCompression = require('../utils/imageCompression');
+        const path = require('path');
+        const fs = require('fs');
+        
+        logger.info('Processing binary images:', {
+          imageCount: images.length
+        });
+        
+        // Process each binary image
+        const uploadPromises = images.map(async (imageData, index) => {
+          try {
+            // Validate image data
+            if (!imageData.data || !imageData.mimeType || !imageData.name) {
+              throw new Error(`Invalid image data at index ${index}`);
+            }
+            
+            // Convert base64 to buffer
+            const buffer = Buffer.from(imageData.data, 'base64');
+            
+            // Try to upload directly to Cloudinary without temporary files first
+            try {
+              // Wait for the upload to complete
+              const uploadPromise = new Promise((resolve, reject) => {
+                cloudinary.uploader.upload_stream({
+                  folder: 'post-images',
+                  transformation: [
+                    { width: 1200, height: 1200, crop: 'limit' },
+                    { quality: 'auto' },
+                    { fetch_format: 'auto' }
+                  ],
+                  resource_type: 'image',
+                  eager: [
+                    { width: 300, height: 300, crop: 'thumb', gravity: 'auto' },
+                    { width: 600, height: 600, crop: 'limit' }
+                  ],
+                  eager_async: true,
+                  eager_notification_url: process.env.CLOUDINARY_WEBHOOK_URL
+                }, (error, result) => {
+                  if (error) {
+                    reject(error);
+                  } else {
+                    resolve(result);
+                  }
+                }).end(buffer);
+              });
+              
+              const result = await uploadPromise;
+              
+              return {
+                url: result.secure_url,
+                thumbnailUrl: result.eager?.[0]?.secure_url || result.secure_url.replace('/upload/', '/upload/c_thumb,w_300,h_300/'),
+                mediumUrl: result.eager?.[1]?.secure_url || result.secure_url,
+                publicId: result.public_id,
+                fileName: imageData.name,
+                fileSize: result.bytes,
+                originalSize: buffer.length,
+                width: result.width,
+                height: result.height,
+                alt: imageData.name,
+                format: result.format,
+                compressionRatio: ((buffer.length - result.bytes) / buffer.length * 100).toFixed(2)
+              };
+              
+            } catch (directUploadError) {
+              logger.warn('Direct upload failed, trying with temporary files:', directUploadError.message);
+              
+              // Fallback to temporary file approach
+              const tempDir = path.join(process.cwd(), 'uploads');
+              if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+              }
+              
+              // Use a more unique filename to avoid conflicts
+              const timestamp = Date.now();
+              const randomId = Math.random().toString(36).substring(2, 15);
+              const safeFileName = imageData.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+              const tempFilePath = path.join(tempDir, `temp_${timestamp}_${randomId}_${safeFileName}`);
+              
+              // Clean up function
+              const cleanupFile = (filePath) => {
+                try {
+                  if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                  }
+                } catch (cleanupError) {
+                  logger.warn(`Failed to cleanup file ${filePath}:`, cleanupError.message);
+                }
+              };
+              
+              try {
+                fs.writeFileSync(tempFilePath, buffer);
+                
+                // Upload to Cloudinary
+                const result = await cloudinary.uploader.upload(tempFilePath, {
+                  folder: 'post-images',
+                  transformation: [
+                    { width: 1200, height: 1200, crop: 'limit' },
+                    { quality: 'auto' },
+                    { fetch_format: 'auto' }
+                  ],
+                  resource_type: 'image',
+                  eager: [
+                    { width: 300, height: 300, crop: 'thumb', gravity: 'auto' },
+                    { width: 600, height: 600, crop: 'limit' }
+                  ],
+                  eager_async: true,
+                  eager_notification_url: process.env.CLOUDINARY_WEBHOOK_URL
+                });
+                
+                // Clean up
+                cleanupFile(tempFilePath);
+                
+                return {
+                  url: result.secure_url,
+                  thumbnailUrl: result.eager?.[0]?.secure_url || result.secure_url.replace('/upload/', '/upload/c_thumb,w_300,h_300/'),
+                  mediumUrl: result.eager?.[1]?.secure_url || result.secure_url,
+                  publicId: result.public_id,
+                  fileName: imageData.name,
+                  fileSize: result.bytes,
+                  originalSize: buffer.length,
+                  width: result.width,
+                  height: result.height,
+                  alt: imageData.name,
+                  format: result.format,
+                  compressionRatio: ((buffer.length - result.bytes) / buffer.length * 100).toFixed(2)
+                };
+                
+              } catch (tempFileError) {
+                cleanupFile(tempFilePath);
+                throw tempFileError;
+              }
+            }
+            
+          } catch (fileError) {
+            logger.error('Error processing binary image:', fileError);
+            throw fileError;
+          }
+        });
+
+        processedImages = await Promise.all(uploadPromises);
+        
+        logger.info('Binary images uploaded successfully:', {
+          count: processedImages.length,
+          publicIds: processedImages.map(img => img.publicId)
+        });
+      } catch (uploadError) {
+        logger.error('Binary image upload error:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload images: ' + uploadError.message });
+      }
+    }
+
+    let post;
+    try {
+      post = await Post.create({
+        community,
+        user: req.user._id,
+        content,
+        images: processedImages,
+        media: processedImages.map(img => img.url), // Legacy support
+        tags,
+        postType,
+        visibility,
+      });
+    } catch (err) {
+      if (err.name === 'ValidationError') {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+    
+    logger.info('Post with binary images created successfully:', {
+      postId: post._id,
+      postType,
+      imageCount: processedImages.length
+    });
+
+    // Create activity record
+    await Activity.create({
+      user: req.user._id,
+      type: 'post_create',
+      message: `Created a new ${postType.toLowerCase()} post with ${processedImages.length} image${processedImages.length !== 1 ? 's' : ''}`,
+      referenceId: post._id,
+      referenceType: 'Post',
+      metadata: {
+        postType: postType,
+        postContent: content ? content.substring(0, 100) : '',
+        tags: tags || [],
+        community: community || null,
+        hasMedia: true,
+        imageCount: processedImages.length,
+        action: 'created'
+      }
+    });
+
+    // Check for badge awards
+    const badgeController = require('../controllers/badgeController');
+    await badgeController.checkAndAwardBadges(req.user._id);
+
+    const postObj = await Post.findById(post._id)
+      .populate('user', 'username firstName lastName avatar')
+      .populate('community', 'name')
+      .populate('likes.user', 'avatar firstName lastName');
+      
+    const postJson = postObj.toObject();
+    postJson.postType = postJson.postType || '';
+    postJson.likes = (postJson.likes || []).map(like => ({
+      userId: like.user?._id || like.user,
+      avatar: like.user?.avatar || '',
+      firstName: like.user?.firstName || '',
+      lastName: like.user?.lastName || '',
+      likedAt: like.likedAt
+    }));
+    
+    res.status(201).json(postJson);
+  } catch (err) {
+    logger.error('Error creating post with binary images:', err);
     next(err);
   }
 };

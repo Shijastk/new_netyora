@@ -17,7 +17,8 @@ router.get('/:id/related', postController.getRelatedPosts);
 
 // Protected routes
 router.post('/', auth, jsonParser, postController.createPost); // Text-only posts
-router.post('/with-images', auth, array('images', 10), handleMulterError, postController.createPostWithImages); // Posts with images
+router.post('/with-images', auth, array('images', 10), handleMulterError, postController.createPostWithImages); // Posts with images (FormData)
+router.post('/with-binary-images', auth, jsonParser, postController.createPostWithBinaryImages); // Posts with binary images (JSON)
 router.put('/:id', auth, jsonParser, postController.editPost);
 router.delete('/:id', auth, postController.deletePost);
 
